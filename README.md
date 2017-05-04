@@ -8,7 +8,7 @@ www.unil.ch/hsdm
 
 Cambridge University Press
 
-http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-model-applications-r?format=PB
+http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r?format=PB#u1w3DhUBMS23Aj0h.97
 
 PUBLICATION PLANNED FOR: August 2017
  
