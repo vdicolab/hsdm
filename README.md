@@ -10,7 +10,7 @@ Cambridge University Press
 
 http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r?format=PB#u1w3DhUBMS23Aj0h.97
 
-PUBLICATION PLANNED FOR: August 2017
+PUBLICATION PLANNED FOR: September 2017
  
 
 AUTHORS:
