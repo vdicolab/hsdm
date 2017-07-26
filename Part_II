@@ -425,7 +425,7 @@ yb<-rainbow(100)[round(runif(cspan,.5,100.5))]
 par(mfcol=c(1,2))
 hist(B3B12.comb,breaks=100,col=heat.colors(cspan), main="Histogram values")
 plot(B3B12.comb,col=yb,main="Stratified map", asp=1)
-#click(B3B12.comb,n=5,type="p",xy=T)
+click(B3B12.comb,n=5,type="p",xy=T)
 par(mfcol=c(1,1))
 ```
 
