@@ -1,5 +1,5 @@
 # hsdm 
-# Code to run the examples of the book
+# Downloads for the book
 Habitat Suitability and Distribution Models: 
 with Applications with R
 
