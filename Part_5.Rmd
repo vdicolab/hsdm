@@ -1,39 +1,31 @@
----
-output:
-  html_document:
-    depth: 3
-    highlight: tango
-    number_sections: no
-    theme: cosmo
-    toc: yes
-  pdf_document:
-    toc: yes
----
-
-
-#_Habitat Suitability and Distribution Models_
-_with Applications in R_\
+# **Habitat Suitability and Distribution Models**
+### with Applications in R
 \
-**by A. Guisan^1^, W. Thuiller^2^, N.E. Zimmermann^3^**,\
+**by A. Guisan 1, W. Thuiller 2, N.E. Zimmermann 3**,\
 \
 with contribution by V. Di Cola, D. Georges and A. Psomas\
 \
-_^1^University of Lausanne, Switzerland_\
-_^2^CNRS, Université Grenoble Alpes, France_\
-_^3^Swiss Federal Research Institute WSL, Switzerland_\
-\
+_1 University of Lausanne, Switzerland_\
+_2 CNRS, UniversitÃ© Grenoble Alpes, France_\
+_3 Swiss Federal Research Institute WSL, Switzerland_\
 
 
+#### Cambridge University Press
 
-```{r fig.width = 6, fig.height = 1.5, echo = FALSE, message = FALSE, warning = FALSE, fig.align = 'center'}
-library(raster)
-par(fig = c(0, 0.3, 0, 1))
-plotRGB(stack('UNIL.png'))
-par(fig = c(0.4, 0.6, 0.2, 0.8), new = TRUE)
-plotRGB(stack('CNRS.jpg'))
-par(fig = c(0.7, 1, 0, 1), new = TRUE)
-plotRGB(stack('logo_wsl.png'))
-```
+http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r?format=PB#OQxt1hBZ3OzB3z44.97
+
+*Citation:* 
+@book{
+  title={Habitat Suitability and Distribution Models: With Applications in R},
+  author={Guisan, A. and Thuiller, W. and Zimmermann, N.E.},
+  isbn={9780521758369},
+  series={Ecology, Biodiversity and Conservation},
+  year={2017},
+  publisher={Cambridge University Press}
+}
+
+*If you use any of these figures and code examples in a presentation or lecture, somewhere in your set of slides we would really appreciate if you please add the paragraph: "Some of the figures in this presentation are taken from "Habitat Suitability and Distribution Models: with applications in R"  (CUP, 2017) with permission from the authors: A. Guisan, W. Thuiller and N.E. Zimmerman " 
+If you wish to use any of these figures in a publication, you must get permission from CUP, and each figure must be accompanied by a similar acknowledgement.*
 
 
 # Part V "Predictions in Space and Time"
