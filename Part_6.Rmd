@@ -1,0 +1,835 @@
+---
+output:
+  html_document:
+    depth: 3
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+
+#_Habitat Suitability and Distribution Models_
+_with Applications in R_\
+\
+**by A. Guisan^1^, W. Thuiller^2^, N.E. Zimmermann^3^**,\
+\
+with contribution by V. Di Cola, D. Georges and A. Psomas\
+\
+_^1^University of Lausanne, Switzerland_\
+_^2^CNRS, Université Grenoble Alpes, France_\
+_^3^Swiss Federal Research Institute WSL, Switzerland_\
+\
+
+#### Cambridge University Press
+
+http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r?format=PB#OQxt1hBZ3OzB3z44.97
+
+
+
+
+```{r fig.width = 6, fig.height = 1.5, echo = FALSE, message = FALSE, warning = FALSE, fig.align = 'center'}
+library(raster)
+par(fig = c(0, 0.3, 0, 1))
+plotRGB(stack('UNIL.png'))
+par(fig = c(0.4, 0.6, 0.2, 0.8), new = TRUE)
+plotRGB(stack('CNRS.jpg'))
+par(fig = c(0.7, 1, 0, 1), new = TRUE)
+plotRGB(stack('logo_wsl.png'))
+```
+
+
+
+
+# Part VI "Developed case studies"
+# Chapter 19: The Biomod2 Modeling Package Examples
+## Section 19.1 - Example 1: Habitat Suitability modeling of *Protea laurifolia* in South-Africa
+
+
+Loading required packages
+*biomod2*, *ggplot2*, *gridExtra* and *rgbif*
+```{r load packages}
+setwd("~/data")
+library(rgbif)
+library(biomod2)
+library(ggplot2)
+library(gridExtra)
+library(raster)
+```
+
+
+#### Getting species data from GBIF using *rgbif* package
+```{r get_data}
+spp_Protea <- name_suggest(q='Protea laurifolia', rank='species',limit = 10000)
+(spp_Protea <- spp_Protea[ grepl("^Protea laurifolia$", spp_Protea$canonicalName),])
+```
+
+
+Get species occurrences
+```{r}
+data <- occ_search(taxonKey = spp_Protea$key, 
+                         country='ZA', 
+                         fields = c('name','key','country','decimalLatitude','decimalLongitude'),  
+                         hasCoordinate=T , 
+                         limit=1000, 
+                         return = 'data')
+
+```
+print the summary of the extracted object
+```{r}
+data
+
+##' It appers that only the item **5637308** as data so we can remove the other ones
+
+data <- data[['5637308']] 
+```
+
+```{r}
+#remove blank spaces from species names.
+data$name <- sub(" ", ".", data$name)
+(spp_to_model <- unique(data$name))
+```
+
+```{r}
+
+## Total number of occurrences: 
+sort(table(data$name), decreasing = T)
+```
+
+#### Getting the environmental data
+
+Get some worldclim environmental variables
+```{r}
+dir.create("WorldClim_data", showWarnings = F)
+## curent bioclim
+download.file(url = "http://biogeo.ucdavis.edu/data/climate/worldclim/1_4/grid/cur/bio_10m_esri.zip", 
+              destfile = "WorldClim_data/current_bioclim_10min.zip", 
+              method = "auto")
+
+## GCM -> BCC-CSM1-1, year -> 2050, RCP -> 4.5
+download.file(url = "http://biogeo.ucdavis.edu/data/climate/cmip5/10m/bc45bi50.zip", 
+              destfile = "WorldClim_data/2050_BC_45_bioclim_10min.zip", 
+              method = "auto")
+
+## GCM -> BCC-CSM1-1, year -> 2080, RCP -> 4.5
+download.file(url = "http://biogeo.ucdavis.edu/data/climate/cmip5/10m/bc45bi70.zip", 
+              destfile = "WorldClim_data/2070_BC_45_bioclim_10min.zip", 
+              method = "auto")
+
+```
+
+
+extract files
+```{r}
+unzip( zipfile = "WorldClim_data/current_bioclim_10min.zip", 
+       exdir = "WorldClim_data/current", 
+       overwrite = T)
+list.files("WorldClim_data/current/bio/")
+
+unzip( zipfile = "WorldClim_data/2050_BC_45_bioclim_10min.zip", 
+       exdir = "WorldClim_data/2050/BC_45",
+       overwrite = T)
+list.files("WorldClim_data/2050/BC_45/")
+
+unzip( zipfile = "WorldClim_data/2070_BC_45_bioclim_10min.zip",
+       exdir = "WorldClim_data/2070/BC_45",
+       overwrite = T)
+list.files("WorldClim_data/2070/BC_45/")
+
+
+```
+
+
+#### Environmental variables selection
+```{r}
+#First we want to extract species occurrences from our data table.
+ProLau_occ <- data[ data$name ==  "Protea.laurifolia", ]
+
+library(raster)
+#stack bio-climatic variables. 
+bioclim_world <- stack(list.files("WorldClim_data/current/bio", pattern ="bio_", full.names=T), RAT = FALSE)
+```
+
+
+```{r}
+#shape-file of Southern Africa in the `biomod2` package.
+
+download.file(url = "https://sourceforge.net/projects/biomod2/files/data_for_example/south_of_africa.zip", destfile = "south_of_africa.zip")
+unzip( zipfile = "south_of_africa.zip", 
+       exdir = ".", 
+       overwrite = T)
+list.files("south_of_africa", recursive = T)
+
+mask_south_of_africa <- shapefile("south_of_africa/South_Africa.shp")
+bioclim_ZA <- mask(bioclim_world, 
+                   mask_south_of_africa[ mask_south_of_africa$CNTRY_NAME == "South Africa", ])
+bioclim_ZA <- crop(bioclim_ZA, mask_south_of_africa)
+```
+
+
+ids of cells where Protea laurifolia occurs.
+```{r}
+points_laurifolia<-data.frame(ProLau_occ[1:290,c("decimalLongitude", "decimalLatitude")])
+
+ProLau_cell_id <- cellFromXY(subset(bioclim_ZA,1), points_laurifolia)
+```
+
+
+#### Principal Component Analysis.
+```{r}
+library(ade4)
+bioclim_ZA_df <- na.omit(as.data.frame(bioclim_ZA))
+head(bioclim_ZA_df)
+
+pca_ZA <- dudi.pca(bioclim_ZA_df,scannf = F, nf = 2)
+
+## PCA scores on first two axes
+plot(pca_ZA$li[,1:2])
+
+## tail of distributions
+sort(pca_ZA$li[,1])[1:10]
+## ids of points to remove
+(to_remove <- which(pca_ZA$li[,1] < -10))
+
+## remove points and recompute PCA
+if(length(to_remove)){ ## remove outliers
+  bioclim_ZA_df <- bioclim_ZA_df[ - to_remove,]
+  pca_ZA <- dudi.pca(bioclim_ZA_df,scannf = F, nf = 2)  
+}
+
+par(mfrow=c(1,2))
+
+## Discriminate Protea laurifolia presences from the entire South African environmental space. 
+s.class(pca_ZA$li[,1:2],
+        fac= factor(rownames(bioclim_ZA_df) %in% ProLau_cell_id, 
+                    levels = c("FALSE", "TRUE" ),
+                    labels = c("backgroud", "ProLau")), 
+        col=c("red","blue"), 
+        csta = 0,
+        cellipse = 2,
+        cpoint = .3,
+        pch = 16)
+
+s.corcircle(pca_ZA$co, clab = 1)
+
+# Sub-selection of the variables.
+bioclim_ZA_sub <- stack(subset(bioclim_ZA, c("bio_5", "bio_7", "bio_11", "bio_19")))
+
+
+library(biomod2)
+ProLau_data <- BIOMOD_FormatingData(resp.var = rep(1, nrow( ProLau_occ ) ),
+                                    expl.var = bioclim_ZA_sub,
+                                    resp.xy = ProLau_occ[,c('decimalLongitude', 'decimalLatitude')],
+                                    resp.name = "Protea.laurifolia",
+                                    PA.nb.rep = 3,
+                                    PA.nb.absences = 500,
+                                    PA.strategy = 'random')
+
+## formatted object summary
+ProLau_data
+## plot of selected pseudo-absences
+plot(ProLau_data)
+
+
+ProLau_opt <- BIOMOD_ModelingOptions(GLM = list( type = 'quadratic',
+                                                 interaction.level = 1 ),
+                                     GBM = list( n.trees = 1000 ),
+                                     GAM = list( algo = 'GAM_mgcv' ) )
+
+ProLau_models <- BIOMOD_Modeling( data = ProLau_data,
+                                  models = c("GLM", "GBM", "RF", "GAM"),
+                                  models.options = ProLau_opt,
+                                  NbRunEval = 4,
+                                  DataSplit = 80,
+                                  VarImport = 3,
+                                  do.full.models = F,
+                                  modeling.id = "ex2" )
+
+## get models evaluation scores
+ProLau_models_scores <- get_evaluations(ProLau_models)
+
+## ProLau_models_scores is a 5 dimension array containing the scores of the models
+dim(ProLau_models_scores)
+dimnames(ProLau_models_scores)
+
+models_scores_graph(ProLau_models, by = "models" , metrics = c("ROC","TSS"), 
+                    xlim = c(0.5,1), ylim = c(0.5,1))
+models_scores_graph(ProLau_models, by = "cv_run" , metrics = c("ROC","TSS"), 
+                    xlim = c(0.5,1), ylim = c(0.5,1))
+models_scores_graph(ProLau_models, by = "data_set" , metrics = c("ROC","TSS"), 
+                    xlim = c(0.5,1), ylim = c(0.5,1))
+
+(ProLau_models_var_import <- get_variables_importance(ProLau_models))
+
+## make the mean of variable importance by algorithm
+apply(ProLau_models_var_import, c(1,2), mean)
+ProLau_glm <- BIOMOD_LoadModels(ProLau_models, models='GLM')
+ProLau_gbm <- BIOMOD_LoadModels(ProLau_models, models='GBM')
+ProLau_rf <- BIOMOD_LoadModels(ProLau_models, models='RF')
+ProLau_gam <- BIOMOD_LoadModels(ProLau_models, models='GAM')
+
+#+ 6, cache=TRUE ,opts.label = "half_page_figure"
+glm_eval_strip <- biomod2::response.plot2(
+    models  = ProLau_glm,
+    Data = get_formal_data(ProLau_models,'expl.var'), 
+    show.variables= get_formal_data(ProLau_models,'expl.var.names'),
+    do.bivariate = FALSE,
+    fixed.var.metric = 'median',
+    legend = FALSE,
+    display_title = FALSE,
+    data_species = get_formal_data(ProLau_models,'resp.var'))
+
+gbm_eval_strip <- biomod2::response.plot2(
+    models  = ProLau_gbm,
+    Data = get_formal_data(ProLau_models,'expl.var'), 
+    show.variables= get_formal_data(ProLau_models,'expl.var.names'),
+    do.bivariate = FALSE,
+    fixed.var.metric = 'median',
+    legend = FALSE,
+    display_title = FALSE,
+    data_species = get_formal_data(ProLau_models,'resp.var'))
+
+rf_eval_strip <- biomod2::response.plot2(
+      models  = ProLau_rf,
+      Data = get_formal_data(ProLau_models,'expl.var'), 
+      show.variables= get_formal_data(ProLau_models,'expl.var.names'),
+      do.bivariate = FALSE,
+      fixed.var.metric = 'median',
+      legend = FALSE,
+      display_title = FALSE,
+      data_species = get_formal_data(ProLau_models,'resp.var'))
+
+gam_eval_strip <- biomod2::response.plot2(
+      models  = ProLau_gam,
+      Data = get_formal_data(ProLau_models,'expl.var'), 
+      show.variables= get_formal_data(ProLau_models,'expl.var.names'),
+      do.bivariate = FALSE,
+      fixed.var.metric = 'median',
+      legend = FALSE,
+      display_title = FALSE,
+      data_species = get_formal_data(ProLau_models,'resp.var'))
+
+
+ProLau_ensemble_models <- BIOMOD_EnsembleModeling( modeling.output = ProLau_models,
+                                                   em.by = 'all',
+                                                   eval.metric = 'TSS',
+                                                   eval.metric.quality.threshold = 0.8,
+                                                   models.eval.meth = c('KAPPA','TSS','ROC'),
+                                                   prob.mean = FALSE,
+                                                   prob.cv = TRUE, 
+                                                   committee.averaging = TRUE,
+                                                   prob.mean.weight = TRUE,
+                                                   VarImport = 0 )
+
+(ProLau_ensemble_models_scores <- get_evaluations(ProLau_ensemble_models))
+
+### Current projections ###
+ProLau_models_proj_current <- BIOMOD_Projection( modeling.output = ProLau_models,
+                                                 new.env = bioclim_ZA_sub,
+                                                 proj.name = "current",
+                                                 binary.meth = "TSS",
+                                                 output.format = ".img",
+                                                 do.stack = FALSE )
+
+ProLau_ensemble_models_proj_current <- 
+  BIOMOD_EnsembleForecasting( EM.output = ProLau_ensemble_models,
+                              projection.output = ProLau_models_proj_current,
+                              binary.meth = "TSS",
+                              output.format = ".img",
+                              do.stack = FALSE )
+
+### Future projections ###
+
+## load 2050 bioclim variables
+bioclim_world_2050_BC45 <- 
+  stack( c( bio_5 = "WorldClim_data/2050/BC_45/bc45bi505.tif",
+            bio_7 = "WorldClim_data/2050/BC_45/bc45bi507.tif",
+            bio_11 = "WorldClim_data/2050/BC_45/bc45bi5011.tif",
+            bio_19 = "WorldClim_data/2050/BC_45/bc45bi5019.tif"), RAT = FALSE )
+
+## crop on our area
+bioclim_ZA_2050_BC45 <- crop( bioclim_world_2050_BC45, mask_south_of_africa)
+bioclim_ZA_2050_BC45 <- mask( bioclim_ZA_2050_BC45, 
+                              mask_south_of_africa[ mask_south_of_africa$CNTRY_NAME == "South Africa", ] )
+bioclim_ZA_2050_BC45 <- stack( bioclim_ZA_2050_BC45 )
+
+## Save this rasterstack on the hard drive if needed. 
+
+ProLau_models_proj_2050_BC45 <- BIOMOD_Projection( modeling.output = ProLau_models,
+                                                   new.env = bioclim_ZA_2050_BC45,
+                                                   proj.name = "2050_BC45",
+                                                   binary.meth = "TSS",
+                                                   output.format = ".img",
+                                                   do.stack = FALSE )
+
+ProLau_ensemble_models_proj_2050_BC45 <- 
+  BIOMOD_EnsembleForecasting( EM.output = ProLau_ensemble_models,
+                              projection.output = ProLau_models_proj_2050_BC45,
+                              binary.meth = "TSS",
+                              output.format = ".img",
+                              do.stack = FALSE )
+
+## load 2070 bioclim variables
+bioclim_world_2070_BC45 <- stack( c( bio_5 = "WorldClim_data/2070/BC_45/bc45bi705.tif",
+                                     bio_7 = "WorldClim_data/2070/BC_45/bc45bi707.tif",
+                                     bio_11 = "WorldClim_data/2070/BC_45/bc45bi7011.tif",
+                                     bio_19 = "WorldClim_data/2070/BC_45/bc45bi7019.tif"), RAT = FALSE )
+## crop on our area
+bioclim_ZA_2070_BC45 <- crop( bioclim_world_2070_BC45, mask_south_of_africa )
+bioclim_ZA_2070_BC45 <- mask( bioclim_ZA_2070_BC45, 
+                              mask_south_of_africa[ mask_south_of_africa$CNTRY_NAME == "South Africa", ])
+bioclim_ZA_2070_BC45 <- stack( bioclim_ZA_2070_BC45 )
+
+## You may save these rasters on the hard drive.
+
+ProLau_models_proj_2070_BC45 <- BIOMOD_Projection( modeling.output = ProLau_models,
+                                                   new.env = bioclim_ZA_2070_BC45,
+                                                   proj.name = "2070_BC45",
+                                                   binary.meth = "TSS",
+                                                   output.format = ".img",
+                                                   do.stack = FALSE )
+
+ProLau_ensemble_models_proj_2070_BC45 <- 
+  BIOMOD_EnsembleForecasting( EM.output = ProLau_ensemble_models,
+                              projection.output = ProLau_models_proj_2070_BC45,
+                              binary.meth = "TSS",
+                              output.format = ".img",
+                              do.stack = FALSE )
+
+
+plot(ProLau_ensemble_models_proj_2070_BC45, 
+     str.grep = "EMca|EMwmean")
+
+## load binary projections
+ProLau_bin_proj_current <- stack( 
+  c( ca = "Protea.laurifolia/proj_current/individual_projections/Protea.laurifolia_EMcaByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img",
+     wm = "Protea.laurifolia/proj_current/individual_projections/Protea.laurifolia_EMwmeanByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img") )
+
+ProLau_bin_proj_2050_BC45 <- stack( 
+  c( ca = "Protea.laurifolia/proj_2050_BC45/individual_projections/Protea.laurifolia_EMcaByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img",
+     wm = "Protea.laurifolia/proj_2050_BC45/individual_projections/Protea.laurifolia_EMwmeanByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img") )
+
+ProLau_bin_proj_2070_BC45 <- stack( 
+  c( ca = "Protea.laurifolia/proj_2070_BC45/individual_projections/Protea.laurifolia_EMcaByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img",
+     wm = "Protea.laurifolia/proj_2070_BC45/individual_projections/Protea.laurifolia_EMwmeanByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img") )
+
+
+## SRC current -> 2050
+SRC_current_2050_BC45 <- BIOMOD_RangeSize( ProLau_bin_proj_current,
+                                           ProLau_bin_proj_2050_BC45 )
+
+SRC_current_2050_BC45$Compt.By.Models
+
+## SRC current -> 2070
+SRC_current_2070_BC45 <- BIOMOD_RangeSize( ProLau_bin_proj_current,
+                                           ProLau_bin_proj_2070_BC45 )
+SRC_current_2070_BC45$Compt.By.Models
+
+ProLau_src_map <- stack(SRC_current_2050_BC45$Diff.By.Pixel, SRC_current_2070_BC45$Diff.By.Pixel)
+names(ProLau_src_map) <- c("ca cur-2050", "wm cur-2050", "ca cur-2070", "wm cur-2070")
+## mask by environmental area
+ProLau_src_map <- mask(ProLau_src_map,
+                       mask_south_of_africa[ mask_south_of_africa$CNTRY_NAME == "South Africa", ])
+
+library(rasterVis)
+my.at <- seq(-2.5,1.5,1)
+myColorkey <- list(at=my.at, ## where the colors change
+                   labels=list(
+                     labels=c("lost", "pres", "abs","gain"), ## labels
+                     at=my.at[-1]-0.5 ## where to print labels
+                   ))
+rasterVis::levelplot( ProLau_src_map, 
+                      main = "Protea laurifolia range change",
+                      colorkey = myColorkey,
+                      layout = c(2,2) )
+
+ref <- subset(ProLau_bin_proj_current, "ca")
+
+## define the facets we want to study
+mods <- c("GLM", "GBM", "RF", "GAM", "caByTSS", "wmeanByTSS")
+data_set <- c("PA1", "PA2", "PA3", "mergedData")
+cv_run <- c("RUN1", "RUN2", "RUN3", "RUN4", "mergedRun")
+
+## construct combination of all facets
+groups <- as.matrix( expand.grid( models = mods, 
+                                  data_set = data_set, 
+                                  cv_run = cv_run,
+                                  stringsAsFactors = FALSE) )
+
+## load all projections we have produced
+all_bin_proj_files <- list.files( path = "Protea.laurifolia",  
+                                  pattern = "_TSSbin.img$",
+                                  full.names = TRUE, 
+                                  recursive = TRUE)
+
+## current versus 2070 (removed the projections by 2050)
+current_and_2070_proj_files <-grep(all_bin_proj_files, pattern="2070", value=T)
+
+## keep only projections that match with our selected facets groups
+selected_bin_proj_files <- apply(
+  groups, 1, 
+  function(x){
+    proj_file <- NA
+    match_tab <- sapply(x, grepl, current_and_2070_proj_files)
+    match_id <- which( apply(match_tab,1,all) )
+    if(length(match_id)) proj_file <- current_and_2070_proj_files[match_id]
+    return(proj_file)
+  })
+
+## remove no-matching groups
+to_remove <- which(is.na(selected_bin_proj_files))
+if(length(to_remove)){
+  groups <- groups[-to_remove,]
+  selected_bin_proj_files <- selected_bin_proj_files[-to_remove]
+}
+
+## build stack of selected projections
+proj_groups <- stack(selected_bin_proj_files)
+
+
+ProbDensFunc( initial = ref,
+              projections = proj_groups,
+              groups = t(groups),
+              plothist = FALSE,
+              cvsn = FALSE,
+              filename = paste("Protea.laurifolia/ProbDensFuncPlot.png"))
+
+```
+
+
+
+
+## Section 19.2 - Example 2: Creating diversity maps for the *Laurus* species
+
+```{r}
+## Getting species data 
+
+if(!require(rgbif)){
+  install.packages("rgbif")
+  require(rgbif)
+}
+
+## get the species list belonging to Larus genus
+spp_larus <- name_lookup(query = 'Larus', rank="species", return = 'data',
+                         status = 'ACCEPTED', limit = 1000 )
+## clean up the species list
+(spp_larus <- spp_larus[ grepl("^Larus ", spp_larus$scientificName),])
+
+## get species occurrences
+occ_larus <- occ_search(taxonKey = spp_larus$key, continent='europe', fields = c('name','key','country','decimalLatitude','decimalLongitude'),  hasCoordinate=T , limit=500, return = 'data')
+
+## join all data in a single data.frame
+data <- NULL
+for(sp in names(occ_larus)){
+  if( !is.null( dim( occ_larus[[sp]] ) ) ){
+    data <- rbind(data, occ_larus[[sp]]) 
+  }
+}
+
+## replace " " by "." in species names
+data$name <- sub(" ", ".", data$name)
+
+## keep only species having more than 20 occurrences
+table(data$name)
+(spp_to_model <- names(table(data$name))[ table(data$name)>20 ] )
+
+{{length(spp_to_model)}}
+
+## get some worldclim environmental variables
+dir.create("WorldClim_data", showWarnings = F)
+## curent bioclim
+download.file(url = "http://biogeo.ucdavis.edu/data/climate/worldclim/1_4/grid/cur/bio_10m_esri.zip", 
+              destfile = "WorldClim_data/current_bioclim_10min.zip", 
+              method = "auto")
+
+## GCM -> BCC-CSM1-1, year -> 2050, RCP -> 4.5
+download.file(url = "http://biogeo.ucdavis.edu/data/climate/cmip5/10m/bc45bi50.zip",
+              destfile = "WorldClim_data/2050_BC_45_bioclim_10min.zip", 
+              method = "auto")
+
+## GCM -> BCC-CSM1-1, year -> 2080, RCP -> 4.5
+download.file(url = "http://biogeo.ucdavis.edu/data/climate/cmip5/10m/bc45bi70.zip", 
+              destfile = "WorldClim_data/2070_BC_45_bioclim_10min.zip", 
+              method = "auto")
+
+## unzip climatic files
+unzip( zipfile = "WorldClim_data/current_bioclim_10min.zip", 
+       exdir = "WorldClim_data/current", 
+       overwrite = T)
+list.files("WorldClim_data/current/bio/")
+
+unzip( zipfile = "WorldClim_data/2050_BC_45_bioclim_10min.zip", 
+       exdir = "WorldClim_data/2050/BC_45", 
+       overwrite = T)
+list.files("WorldClim_data/2050/BC_45/")
+
+unzip( zipfile = "WorldClim_data/2070_BC_45_bioclim_10min.zip", 
+       exdir = "WorldClim_data/2070/BC_45", 
+       overwrite = T)
+list.files("WorldClim_data/2070/BC_45/")
+```
+
+
+```{r}
+## load libraries
+library(biomod2)
+library(gridExtra)
+library(rasterVis)
+library(reshape2)
+
+europe_ext <- extent(-11,41,35,72)
+
+## load environmental variables within a 'RasterStack' object
+stk_current <- stack( list.files(path = "WorldClim_data/current/bio/", 
+                                 pattern = "bio_", 
+                                 full.names = T), RAT=F )
+
+
+## Clip the environmental variables to the European extent
+stk_current <- crop(stk_current, europe_ext)
+
+## convert our environmental Stack into data.frame
+current_df <- as.data.frame(stk_current)
+current_df <- na.omit(current_df)
+
+## calculate Pearson correlations between pairs of variables 
+cor_current <- cor(current_df)
+
+## reformat correlation table for graphical analyse
+cor_current[ upper.tri(cor_current, diag = T) ] <- NA
+cor_current_resh <- na.omit( melt( cor_current ) )
+colnames(cor_current_resh) <- c("var1", "var2", "correlation")
+
+## only consider absolute value of correlations
+cor_current_resh$correlation <- abs(cor_current_resh$correlation)
+
+## make a correlation plot
+gg_cor <- ggplot(cor_current_resh, aes(x = var1, y = var2 , fill = correlation) )
+gg_cor <- gg_cor + geom_tile() + xlab("") + ylab("") + theme( axis.text.x  = element_text(angle=90, vjust=0.5))
+print(gg_cor)
+
+selected_vars <- c("bio_1", "bio_12", "bio_8")
+
+## check correlations between selected variables
+(cor_sel <- cor(current_df[,selected_vars]))
+
+{{round(max(abs(cor_sel[upper.tri(cor_sel, diag = F)])), digits =2)}}
+## keep only the selected variables
+stk_current <- stack(subset(stk_current, selected_vars))
+
+plot(stk_current)
+
+## NOTE : respect layer names and order across stacks
+stk_2050_BC_45 <- stack( c( bio_1 = "WorldClim_data/2050/BC_45/bc45bi501.tif",
+                            bio_12 = "WorldClim_data/2050/BC_45/bc45bi5012.tif",
+                            bio_8 = "WorldClim_data/2050/BC_45/bc45bi508.tif"),
+                         RAT=F)
+stk_2050_BC_45 <- stack(crop(stk_2050_BC_45, europe_ext))
+
+stk_2070_BC_45 <- stack( c( bio_1 = "WorldClim_data/2070/BC_45/bc45bi701.tif",
+                            bio_12 = "WorldClim_data/2070/BC_45/bc45bi7012.tif",
+                            bio_8 = "WorldClim_data/2070/BC_45/bc45bi708.tif"),
+                         RAT=F)
+stk_2070_BC_45 <- stack(crop(stk_2070_BC_45, europe_ext))
+
+```
+
+```{r}
+## build a biomod2 modelling wrapper
+
+biomod2_wrapper <- function(sp){
+  cat("\n> species : ", sp)
+  
+  ## get occurrences points
+  sp_dat <- data[ data$name == sp, ]
+  
+  ## formating the data
+  sp_format <- BIOMOD_FormatingData(resp.var = rep( 1, nrow(sp_dat) ), 
+                                    expl.var = stk_current,
+                                    resp.xy = sp_dat[,c("decimalLongitude","decimalLatitude")],
+                                    resp.name = sp,
+                                    PA.strategy = "random", 
+                                    PA.nb.rep = 3, 
+                                    PA.nb.absences = 1000)
+  ## print formatting summary
+  sp_format
+  
+  ## save image of input data summary
+  if(!exists(sp)) dir.create(sp)
+  pdf(paste(sp, "/", sp ,"_data_formated.pdf", sep="" ))
+  try(plot(sp_format))
+  dev.off()
+  
+  ## define models options
+  sp_opt <- BIOMOD_ModelingOptions()
+  
+  ## model species
+  sp_model <- BIOMOD_Modeling( sp_format, 
+                               models = c('GLM','FDA','RF'), 
+                               models.options = sp_opt, 
+                               NbRunEval = 3, 
+                               DataSplit = 70, 
+                               Yweights = NULL, 
+                               VarImport = 3, 
+                               models.eval.meth = c('TSS','ROC'),
+                               SaveObj = TRUE,
+                               rescal.all.models = FALSE,
+                               do.full.models = FALSE,
+                               modeling.id = "ex3")
+  
+  ## save some graphical outputs
+  #### models scores
+  pdf(paste(sp, "/", sp ,"_models_scores.pdf", sep="" ))
+  try( gg1 <- models_scores_graph(sp_model, metrics = c("TSS","ROC"), by = 'models', plot=F) )
+  try( gg2 <- models_scores_graph(sp_model, metrics = c("TSS","ROC"), by = 'data_set', plot=F) )
+  try( gg3 <- models_scores_graph(sp_model, metrics = c("TSS","ROC"), by = 'cv_run', plot=F) )
+  try(grid.arrange(gg1,gg2,gg3))
+  dev.off()
+  
+  ## build ensemble models
+  sp_ens_model <- BIOMOD_EnsembleModeling( modeling.output = sp_model,
+                                           chosen.models = 'all',
+                                           em.by = 'all',
+                                           eval.metric = c('TSS'),
+                                           eval.metric.quality.threshold = c(0.7),
+                                           models.eval.meth = c('TSS','ROC'),
+                                           prob.mean = TRUE,
+                                           prob.cv = TRUE,
+                                           prob.ci = FALSE,
+                                           prob.ci.alpha = 0.05,
+                                           prob.median = FALSE,
+                                           committee.averaging = TRUE,
+                                           prob.mean.weight = TRUE,
+                                           prob.mean.weight.decay = 'proportional' )
+  
+  ## do projections
+  proj_scen <- c("current", "2050_BC_45", "2070_BC_45")
+  
+  for(scen in proj_scen){
+    cat("\n> projections of ", scen)
+    
+    ## single model projections
+    sp_proj <- BIOMOD_Projection(  modeling.output = sp_model,
+                                   new.env = get(paste("stk_", scen, sep = "")),
+                                   proj.name = scen,
+                                   selected.models = 'all',
+                                   binary.meth = "TSS",
+                                   filtered.meth = NULL,
+                                   compress = TRUE,
+                                   build.clamping.mask = TRUE,
+                                   do.stack = FALSE,
+                                   output.format = ".img" )
+    
+    ## ensemble model projections
+    sp_ens_proj <- BIOMOD_EnsembleForecasting(EM.output = sp_ens_model,
+                                              projection.output = sp_proj,
+                                              binary.meth = "TSS",
+                                              compress = TRUE,
+                                              do.stack = FALSE,
+                                              output.format = ".img")
+    
+  }
+  
+  return(paste(sp," modelling completed !", sep=""))
+  
+}
+
+if(require(snowfall)){ ## parallel computation
+  ## start the cluster
+  sfInit(parallel = TRUE, cpus = 2) ## here we only require 2 cpus
+  sfExportAll()
+  sfLibrary(biomod2)
+  ## launch our wrapper in parallel
+  sf_out <- sfLapply(spp_to_model, biomod2_wrapper)
+  ## stop the cluster
+  sfStop()
+} else { ## sequencial computation
+  for (sp in spp_to_model){
+    biomod2_wrapper(sp)
+  }
+  ## or with a lapply function in sequential model
+  ## all_species_bm <- lapply(spp_to_model, biomod2_wrapper)
+}
+
+## current conditons
+### load binary projections
+f_em_wmean_bin_current <- paste(spp_to_model,
+                                "/proj_current/individual_projections/", 
+                                spp_to_model,
+                                "_EMwmeanByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img",
+                                sep = "")
+
+### sum all projections
+if( length(f_em_wmean_bin_current) >= 2 ){
+  ## initialisation
+  taxo_alpha_div_current <- raster( f_em_wmean_bin_current[1] ) 
+  for(f in f_em_wmean_bin_current){
+    taxo_alpha_div_current <- taxo_alpha_div_current + raster(f)
+  }
+}
+
+### mask by environmental mask (will be remove with next version of biomod2)
+taxo_alpha_div_current <- mask(taxo_alpha_div_current, subset(stk_current,1))
+
+## 2050 conditons
+### load binaries projections
+f_em_wmean_bin_2050 <- paste(spp_to_model,
+                             "/proj_2050_BC_45/individual_projections/", 
+                             spp_to_model,
+                             "_EMwmeanByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img",
+                             sep = "")
+
+### sum all projections
+if( length(f_em_wmean_bin_2050) >= 2 ){
+  ## initialisation
+  taxo_alpha_div_2050 <- raster( f_em_wmean_bin_2050[1] ) 
+  for(f in f_em_wmean_bin_2050){
+    taxo_alpha_div_2050 <- taxo_alpha_div_2050 + raster(f)
+  }
+}
+
+### mask by environmental mask (will be remove with next version of biomod2)
+taxo_alpha_div_2050 <- mask(taxo_alpha_div_2050, subset(stk_2050_BC_45,1))
+
+## 2070 conditons
+### load binaries projections
+f_em_wmean_bin_2070 <- paste(spp_to_model,
+                             "/proj_2070_BC_45//individual_projections/", 
+                             spp_to_model,
+                             "_EMwmeanByTSS_mergedAlgo_mergedRun_mergedData_TSSbin.img",
+                             sep = "")
+
+### sum all projections
+if( length(f_em_wmean_bin_2070) >= 2 ){
+  ## initialisation
+  taxo_alpha_div_2070 <- raster( f_em_wmean_bin_2070[1] ) 
+  for(f in f_em_wmean_bin_2070){
+    taxo_alpha_div_2070 <- taxo_alpha_div_2070 + raster(f)
+  }
+}
+```
+
+```{r}
+### mask by environmental mask (will be remove with next version of biomod2)
+taxo_alpha_div_2070 <- mask(taxo_alpha_div_2070, subset(stk_2070_BC_45,1))
+
+## plot the results
+levelplot( stack( c(current = taxo_alpha_div_current, 
+                    in_2050 = taxo_alpha_div_2050, 
+                    in_2070 = taxo_alpha_div_2070 ) ),
+           main = expression(paste("Larus ", alpha, "-diversity")),
+           par.settings = BuRdTheme)
+```
+
+
+
+
+
+
+
+
+
+
+

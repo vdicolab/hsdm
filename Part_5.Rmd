@@ -1,0 +1,620 @@
+---
+output:
+  html_document:
+    depth: 3
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+
+#_Habitat Suitability and Distribution Models_
+_with Applications in R_\
+\
+**by A. Guisan^1^, W. Thuiller^2^, N.E. Zimmermann^3^**,\
+\
+with contribution by V. Di Cola, D. Georges and A. Psomas\
+\
+_^1^University of Lausanne, Switzerland_\
+_^2^CNRS, Université Grenoble Alpes, France_\
+_^3^Swiss Federal Research Institute WSL, Switzerland_\
+\
+
+
+
+```{r fig.width = 6, fig.height = 1.5, echo = FALSE, message = FALSE, warning = FALSE, fig.align = 'center'}
+library(raster)
+par(fig = c(0, 0.3, 0, 1))
+plotRGB(stack('UNIL.png'))
+par(fig = c(0.4, 0.6, 0.2, 0.8), new = TRUE)
+plotRGB(stack('CNRS.jpg'))
+par(fig = c(0.7, 1, 0, 1), new = TRUE)
+plotRGB(stack('logo_wsl.png'))
+```
+
+
+# Part V "Predictions in Space and Time"
+## Chapter 17 Projecting Models in Space and Time
+### Additional considerations and assumptions when projecting models: analog environment, niche completeness, and niche stability 
+
+Required packages
+
+```{r load packages, message=FALSE,warning=FALSE}
+library(ecospat)
+```
+
+Set Working Directory
+```{r setwd}
+setwd("~/data")
+```
+
+
+#### Preparation of datasets 
+Load climate variable for all site of the Eurasian study area (column names should be x,y,X1,X2,...,Xn)
+```{r clim1}
+clim1<-read.table("tabular/bioclim/current/clim.vulpesNA_100.txt",h=TRUE)
+```
+Load climate variable for all site of the North American study area (column names should be x,y,X1,X2,...,Xn)
+```{r clim2}
+clim2<-read.table("tabular/bioclim/current/clim.vulpesEU_100.txt",h=TRUE)
+```
+
+Global climate for both ranges
+```{r clim12}
+clim12<-rbind(clim1,clim2)
+```
+
+Loading occurrence sites for the species (column names should be x,y)
+```{r occurrences}
+occ.sp1<-na.exclude(read.table("tabular/species/vulpes_na.txt",h=TRUE)[c(1,2)])
+occ.sp2<-na.exclude(read.table("tabular/species/vulpes_eu.txt",h=TRUE)[c(1,2)])
+```
+
+Create sp occurrence dataset by adding climate variables from the global climate datasets
+```{r sample_occur}
+occ.sp1<-na.exclude(ecospat.sample.envar(dfsp=occ.sp1,colspxy=1:2,colspkept=NULL,dfvar=clim1,colvarxy=1:2,colvar="all",resolution=1))
+occ.sp2<-na.exclude(ecospat.sample.envar(dfsp=occ.sp2,colspxy=1:2,colspkept=NULL,dfvar=clim2,colvarxy=1:2,colvar="all",resolution=1))
+```
+
+
+#### ANALYSIS 
+Selection of variables to include in the analyses
+```{r sel_var}
+names(clim12)
+Xvar<-c(3:21)
+nvar<-length(Xvar)
+```
+
+Number of interation for the tests of equivalency and similarity
+```{r interations}
+iterations<-100
+```
+
+Resolution of the gridding of the climate space
+```{r resolution}
+R=100
+```
+
+Row weigthing and grouping factors for ade4 functions  
+```{r row_weight}
+row.w.1.occ<-1-(nrow(occ.sp1)/nrow(rbind(occ.sp1,occ.sp2))) # prevalence of occ1
+row.w.2.occ<-1-(nrow(occ.sp2)/nrow(rbind(occ.sp1,occ.sp2))) # prevalence of occ2
+row.w.occ<-c(rep(0, nrow(clim1)),rep(0, nrow(clim2)),rep(row.w.1.occ, nrow(occ.sp1)),rep(row.w.2.occ, nrow(occ.sp2)))
+```
+
+
+```{r rows}
+row.w.1.env<-1-(nrow(clim1)/nrow(clim12))  # prevalence of clim1
+row.w.2.env<-1-(nrow(clim2)/nrow(clim12))  # prevalence of clim2
+row.w.env<-c(rep(row.w.1.env, nrow(clim1)),rep(row.w.2.env, nrow(clim2)),rep(0, nrow(occ.sp1)),rep(0, nrow(occ.sp2)))
+```
+
+```{r fact}
+fac<-as.factor(c(rep(1, nrow(clim1)),rep(2, nrow(clim2)),rep(1, nrow(occ.sp1)),rep(2, nrow(occ.sp2))))
+```
+
+Global dataset for the analysis and rows for each sub dataset
+
+```{r global_data}
+data.env.occ<-rbind(clim1,clim2,occ.sp1,occ.sp2)[Xvar]
+row.clim1<-1:nrow(clim1)
+row.clim2<-(nrow(clim1)+1):(nrow(clim1)+nrow(clim2))
+row.clim12<-1:(nrow(clim1)+nrow(clim2))
+row.sp1<-(nrow(clim1)+nrow(clim2)+1):(nrow(clim1)+nrow(clim2)+nrow(occ.sp1))
+row.sp2<-(nrow(clim1)+nrow(clim2)+nrow(occ.sp1)+1):(nrow(clim1)+nrow(clim2)+nrow(occ.sp1)+nrow(occ.sp2))
+```
+
+#### PCA-ENV 
+Measures niche overlap along the two first axes of a PCA calibrated on all the pixels of the study areas
+```{r pca}
+pca.cal <-dudi.pca(data.env.occ,row.w = row.w.env, center = T, scale = T, scannf = F, nf = 2)
+```
+
+Predict the scores on the axes
+```{r scores}
+scores.clim12<- pca.cal$li[row.clim12,]
+scores.clim1<- pca.cal$li[row.clim1,]
+scores.clim2<- pca.cal$li[row.clim2,]
+scores.sp1<- pca.cal$li[row.sp1,]
+scores.sp2<- pca.cal$li[row.sp2,]
+```
+
+Calculation of environmental density
+```{r env_density_z1}
+z1<- ecospat.grid.clim.dyn(scores.clim12,scores.clim1,th.sp= 0,scores.sp1,R)
+z1$z.uncor<-z1$Z
+```
+
+```{r env_density_z2}
+z2<- ecospat.grid.clim.dyn(scores.clim12,scores.clim2,th.sp= 0,scores.sp2,R)
+z2$z.uncor<-z2$Z
+```
+
+Plot realized environment
+```{r plot.realized_niche 17.2}
+par(cex=1.5)
+ecospat.plot.niche(z1,title="Realized environment in North America",name.axis1="PC1",name.axis2="PC2")
+ecospat.plot.niche(z2,title="Realized environment in Eurasia",name.axis1="PC1",name.axis2="PC2")
+ecospat.plot.niche.dyn (z1, z2, quant=0.8, title="Realized environment overlap",name.axis1="PC1",name.axis2="PC2", interest = 1, colz1 = "#00FF0050", colz2 = "#FF000050", colinter = "#0000FF50", colZ1 = "green3", colZ2 = "red3") 
+```
+
+Calculation of occurence density
+```{r occ-density}
+z1<- ecospat.grid.clim.dyn(scores.clim12,scores.clim1,th.sp= 0,scores.sp1,R)
+z2<- ecospat.grid.clim.dyn(scores.clim12,scores.clim2,th.sp= 0,scores.sp2,R)
+```
+
+Plot niche overlap
+```{r plot.Niche_overlap1 17.5}
+par(cex=1.5)
+ecospat.plot.niche(z1,title="North American niche",name.axis1="PC1",name.axis2="PC2")
+ecospat.plot.niche(z2,title="Eurasian niche",name.axis1="PC1",name.axis2="PC2")
+
+ecospat.plot.niche.dyn (z1=z1, z2=z2, quant=0.8, title="Niche overlap",name.axis1="PC1",name.axis2="PC2", interest = 1, colz1 = "#00FF0050", colz2 = "#FF000050", colinter = "#0000FF50", colZ1 = "green3", colZ2 = "red3") 
+```
+
+## Projecting species distributions in space
+
+
+Required packages
+```{r load packages2, message=FALSE,warning=FALSE}
+library(mgcv)
+library(ade4)
+library(raster)
+library(fields)
+library(dismo)
+library(biomod2)
+```
+
+Read mammals and bioclim data
+```{r read_data2}
+mammals_data <- read.csv("tabular/species/mammals_and_bioclim_table.csv", row.names=1)
+```
+
+Fit GAM similar as in Chapter 10.3
+```{r gam}
+gam1 = gam(VulpesVulpes ~ s(bio3) + s(bio7) + s(bio11) + s(bio12), data=mammals_data, family="binomial")
+```
+
+Load current climate data
+```{r load_data}
+bio3r.cu<-raster("raster/bioclim/current/grd/bio3.grd")
+bio7r.cu<-raster("raster/bioclim/current/grd/bio7.grd")
+bio11r.cu<-raster("raster/bioclim/current/grd/bio11.grd")
+bio12r.cu<-raster("raster/bioclim/current/grd/bio12.grd")
+biostack.curr<-stack(bio3r.cu,bio7r.cu,bio11r.cu,bio12r.cu)
+names(biostack.curr)
+```
+
+Predict to raster stack and visualize
+```{r vulpes_curr_gam 17.7}
+vulpes.curr <- predict(biostack.curr, gam1, type="response")
+plot(vulpes.curr, col=two.colors(start="grey90",end="firebrick4", middle= "orange2"))
+```
+
+Predict also standard error to data.frame and visualize
+```{r SE_GAM 17.8}
+vulpes.se<-predict(gam1, mammals_data, type="response", se.fit=TRUE)
+plot(mammals_data[,1:2],pch=15,cex=.25,col="grey70",xlab="Longitude",ylab="Latitude")
+points(mammals_data[which(vulpes.se[[2]]>.05),1:2],pch=15,cex=.25,col="#FDD017")
+points(mammals_data[which(vulpes.se[[2]]>.10),1:2],pch=15,cex=.25,col="#E56717")
+points(mammals_data[which(vulpes.se[[2]]>.15),1:2],pch=15,cex=.25,col="#E42217")
+points(mammals_data[which(vulpes.se[[2]]>.20),1:2],pch=15,cex=.25,col="#9F000F")
+legend("bottomleft",legend=c("0.00 - 0.05","0.05 - 0.10", "0.10 - 0.15", "0.15 - 0.20","0.20 - 0.25"),
+  pch=c(15,15,15,15,15),col=c("grey70","#FDD017","#E56717","#E42217","#9F000F"),cex=.6,bg="white",
+  title="GAM Standard error")
+
+```
+
+
+```{r raster_se 17.9}
+vulpes.se_raster <- rasterize(cbind(mammals_data[,c(1:2)]),y=bio3r.cu,field=vulpes.se[[2]])
+
+plot(vulpes.se_raster, col=two.colors(start="grey90",end="firebrick4", middle= "orange2"))
+```
+```{r}
+vulpes_oldnew<-mammals_data[mammals_data$Y_WGS84>30.0,
+    c(1:2,8:13)]
+tmp1<-dudi.pca(vulpes_oldnew[,c(4,6:8)], nf=2, scannf=F)
+tmp2<-data.frame(cbind(vulpes_oldnew,tmp1$li))
+cols<-rep("#3090C733",nrow(vulpes_oldnew))
+cols[vulpes_oldnew$X_WGS84>-13]<-"#9F000F4D" 
+```
+
+
+```{r diff_old_new 17.10}
+par(mfrow=c(1,2))
+plot(bio3r.cu, legend=F,col="grey")
+points(vulpes_oldnew [,c(1:2)], col=cols, pch=16, cex=0.6)
+plot(jitter(tmp2$Axis1,amount=.3),jitter(tmp2$Axis2, amount=.3),col=cols, pch=16,cex=.5,xlab="PCA-Axis 1", ylab="PCA-Axis 2")
+par(mfrow=c(1,1))
+```
+
+MESS
+```{r mess1 17.11 }
+vulpes_east<-mammals_data[mammals_data$X_WGS84>-13.0, c(1:2,8:13)]
+vulpes_ne<-vulpes_east[vulpes_east$Y_WGS84>30,]
+vulpes_europe<-vulpes_ne[vulpes_ne$X_WGS84<60,]
+
+Mess.Vulpes <- mess(biostack.curr, vulpes_oldnew[,c(4,6:8)])
+plot(Mess.Vulpes)
+points(vulpes_europe[,1:2], col="red", pch=16, cex=0.3)
+
+```
+
+MESS with ECOSPAT
+```{r mess_ecospat 17.11b}
+
+library(ecospat)
+mess.mammals <- ecospat.mess(mammals_data[,c(1:2,8:13)], vulpes_europe)
+ecospat.plot.mess(mammals_data[,c(1:2)], mess.mammals)
+```
+
+
+
+## Projecting species in time
+
+```{r future_var}
+bio3r.fu<-raster("raster/bioclim/future/grd/bio3.grd")
+bio7r.fu<-raster("raster/bioclim/future/grd/bio7.grd")
+bio11r.fu<-raster("raster/bioclim/future/grd/bio11.grd")
+bio12r.fu<-raster("raster/bioclim/future/grd/bio12.grd")
+biostack.fut<-stack(bio3r.fu,bio7r.fu,bio11r.fu,bio12r.fu)
+names(biostack.fut)
+
+```
+
+```{r gam_curr_fut 17.13}
+vulpes.fut <- predict(biostack.fut, gam1, type="response")
+vulpes.na.cur<-crop(vulpes.curr, extent(-170,-50,10,90))
+vulpes.na.fut<-crop(vulpes.fut, extent(-170,-50,10,90))
+par(mfrow=c(1,2))
+  plot(vulpes.na.cur, col=two.colors(start="grey90", 
+    end="firebrick4", middle= "orange2"),main="Current climate")
+  plot(vulpes.na.fut, col=two.colors(start="grey90",
+    end="firebrick4",middle= "orange2"),main="Future climate")
+par(mfrow=c(1,1))
+```
+
+Future HS and Uncertainty
+```{r uncertainty 17.14}
+biostack.fut_df <- as.data.frame(rasterToPoints(biostack.fut))
+vulpes.fut_se <- predict(gam1, biostack.fut_df, 
+    type="response", se.fit=T)
+vulpes.fut_se <- rasterFromXYZ(cbind(biostack.fut_df[,1:2],
+    vulpes.fut_se), biostack.fut)
+vulpes.fut_se<-crop(vulpes.fut_se, extent(-170,-50,10,90))
+names(vulpes.fut_se) <- c("Habitat suitability future 
+    climate", "Habitat suitability Uncertainty")
+plot(vulpes.fut_se, col=two.colors(start="grey90",
+    end="firebrick4", middle= "orange2"))
+```
+
+
+## Ensemble projections
+
+```{r load packages3}
+library(MASS)
+library(earth)
+library(randomForest)
+library(mda)
+library(biomod2)
+```
+
+Extract the future layers for the presence and absence points. 
+```{r Future_env}
+FutureEnv <- as.data.frame(cbind(mammals_data [,c(1:8)], extract(biostack.fut, mammals_data [,c(1,2)])))
+FutureEnv <- na.omit(FutureEnv)
+```
+
+Create a dataframe to store the evaluation result for each model for each split-sampling
+```{r test-results}
+nRow <- nrow(mammals_data)
+nCV <- 20 # the number of repeated split-sampling. 
+Test_results <- as.data.frame(matrix(0,ncol=nCV,nrow=5, 
+    dimnames=list(c("GLM","GAM","MARS","FDA","RF"), NULL)))
+```
+
+Create an array to store the predicted habitat suitability for current conditions for each single model x single split-sampling
+```{r pred-reuslts}
+Pred_results <- array(0,c(nRow, 5,nCV), 
+    dimnames=list(seq(1:nRow), c("GLM","GAM","MARS","FDA","RF"), 
+    seq(1:nCV)))
+```
+
+Create an array to store the predicted habitat suitability for future conditions for each single model x cross-validation combination
+
+```{r Proj_future}
+ProjFuture_results <- array(0,c(nrow(FutureEnv), 5,nCV), 
+    dimnames=list(seq(1:nrow(FutureEnv)), 
+    c("GLM","GAM","MARS","FDA","RF"), seq(1:nCV)))
+ProjFuture_results_bin <- array(0,c(nrow(FutureEnv), 5,nCV), 
+    dimnames=list(seq(1:nrow(FutureEnv)), 
+    c("GLM","GAM","MARS","FDA","RF"), seq(1:nCV)))
+```
+
+Function to create the calibration and evaluation dataset
+```{r SampMat}
+SampMat <- function (ref, ratio, as.logi = FALSE) {
+    ntot <- length(ref)
+    npres <- sum(ref)
+    ncal <- ceiling(ntot * ratio)
+    pres <- sample(which(ref == 1), ceiling(npres * ratio))
+    absc <- sample(which(ref == 0), ncal - length(pres))
+    if (as.logi){
+        calib <- rep(FALSE, ntot)
+        calib[c(pres, absc)] <- TRUE
+        eval <- !calib
+    }
+    else {
+        calib <- c(pres, absc)
+        eval <- (1:ntot)[-c(pres, absc)]
+    }
+    return(list(calibration = calib, evaluation = eval))
+}
+```
+
+#### Loop across the 20-fold repeated split sampling
+```{r loop.20fold, warning=FALSE}
+for(i in 1:nCV) {
+    # separate the original data into one subset for calibration 
+    # and the other for evaluation. 
+    a <- SampMat(ref=mammals_data$VulpesVulpes, ratio=0.7) 
+        # function from the biomod2 package
+    calib <- mammals_data[a$calibration,]
+    eval <- mammals_data[a$evaluation,]
+  
+    ### GLM ###
+    glmStart <- glm(VulpesVulpes~1, data=calib, family=binomial)
+    glm.formula <- 
+    makeFormula("VulpesVulpes",mammals_data[,c("bio3",  "bio7", 
+    "bio11", "bio12")],"quadratic",interaction.level=1)
+    glmModAIC <- stepAIC( glmStart, glm.formula, data = calib, 
+        direction = "both", trace = FALSE, k = 2, 
+        control=glm.control(maxit=100))
+    # prediction to the evaluation data and evaluation using the 
+    # TSS approach
+    Pred_test <-  predict(glmModAIC, eval, type="response")
+    # The Find.Optim.Stat from biomod2 computes the TSS and will 
+    # provide the cutoff that optimizes it. Within biomod2, 
+    # probabilities of presence are transformed into integers after 
+    # being multiplied by 1,000 (to save memory space). We will 
+    # therefore multiply here the probability of occurrence by 1,000. 
+    Test <- Find.Optim.Stat(Stat='TSS', Fit=Pred_test*1000, 
+        Obs=eval$VulpesVulpes)
+    Test_results["GLM",i] <- Test[1,1]
+    # prediction on the total dataset for current and future.
+    Pred_results[,"GLM",i] <- predict(glmModAIC, mammals_data, 
+        type="response")
+    ProjFuture_results[,"GLM",i] <- predict(glmModAIC, FutureEnv, 
+        type="response")
+    # transform the probability of occurrence into binary 
+    # predictions. Use the cutoff that optimizes the TSS 
+    # statistics divided by 1,000.  
+    ProjFuture_results_bin[ProjFuture_results[,
+        "GLM",i]>=(Test[1,2]/1000),"GLM",i] <- 1
+  
+    ### GAM ###  
+    gam_mgcv <- gam(VulpesVulpes~
+        s(bio3)+s(bio7)+s(bio11)+s(bio12),data=calib, 
+        family="binomial")
+    # prediction on the evaluation data and evaluation using the 
+    # TSS approach
+    Pred_test <-  predict(gam_mgcv, eval, type="response")
+    Test <- Find.Optim.Stat(Stat='TSS', Fit=Pred_test*1000, 
+        Obs=eval$VulpesVulpes)
+    Test_results["GAM",i] <- Test[1,1]
+    # prediction on the total dataset
+    Pred_results [Pred_results[,"GAM",i] >= 
+        (Test[1,2]/1000),"GAM",i] <- 1
+    ProjFuture_results[,"GAM",i] <- predict(gam_mgcv, FutureEnv, 
+        type="response")
+    ProjFuture_results_bin[ProjFuture_results[,"GAM",i] >= 
+        (Test[1,2]/1000),"GAM",i] <- 1
+  
+    ### MARS ###
+    Mars_int2 = earth(VulpesVulpes ~ 1+bio3+bio7+bio11+bio12, 
+        data=calib, degree = 2, glm=list(family=binomial))
+    # prediction on the evaluation data and evaluation using the 
+    # TSS approach
+    Pred_test <-  predict(Mars_int2, eval, type="response")
+    Test <- Find.Optim.Stat(Stat='TSS', Fit=Pred_test*1000, 
+        Obs=eval$VulpesVulpes)
+    Test_results["MARS",i] <- Test[1,1]
+    # prediction on the total dataset
+    Pred_results[,"MARS",i] <- predict(Mars_int2, mammals_data, 
+        type="response")
+    ProjFuture_results[,"MARS",i] <- predict(Mars_int2, 
+        FutureEnv, type="response")
+    ProjFuture_results_bin[ProjFuture_results[,"MARS",i] >= 
+        (Test[1,2]/1000),"MARS",i] <- 1
+  
+    ### FDA ###
+    fda_mod = fda(VulpesVulpes ~ 1+bio3+bio7+bio11+bio12, 
+        data=calib,method=mars)
+    # prediction on the evaluation data and evaluation using the 
+    # TSS approach
+    Pred_test <-  predict(fda_mod, eval, type = "posterior")[,2]
+    Test <- Find.Optim.Stat(Stat='TSS', Fit=Pred_test*1000, 
+        Obs=eval$VulpesVulpes)
+    Test_results["FDA",i] <- Test[1,1]
+    # prediction on the total dataset
+    Pred_results[,"FDA",i] = predict(fda_mod, 
+        mammals_data[,c("bio3",  "bio7", "bio11", "bio12")], 
+        type="posterior")[,2]
+    ProjFuture_results[,"FDA",i] = predict(fda_mod, 
+        FutureEnv[,c("bio3",  "bio7", "bio11", "bio12")], 
+        type="posterior")[,2]
+    ProjFuture_results_bin[ProjFuture_results[,"FDA",i] >= 
+        (Test[1,2]/1000),"FDA",i] <- 1
+  
+    ### Random Forest ###  
+    RF_mod = randomForest(x = calib[,c("bio3",  "bio7", "bio11", 
+        "bio12")],y = as.factor(calib$VulpesVulpes), ntree = 
+        1000, importance = TRUE)
+    # prediction on the evaluation data and evaluation using the 
+    # TSS approach
+    Pred_test <-  predict(RF_mod, eval, type="prob")[,2]
+    Test <- Find.Optim.Stat(Stat='TSS', Fit=Pred_test*1000, 
+        Obs=eval$VulpesVulpes)
+    Test_results["RF",i] <- Test[1,1]  
+    # prediction on the total dataset
+    Pred_results[,"RF",i] = predict(RF_mod, mammals_data, 
+        type="prob")[,2]
+    ProjFuture_results[,"RF",i] = predict(RF_mod, FutureEnv, 
+        type="prob")[,2]
+    ProjFuture_results_bin[ProjFuture_results[,"RF",i] >= 
+        (Test[1,2]/1000),"RF",i] <- 1
+}
+```
+
+Variation in TSS between models and cross-validation runs
+```{r TSS}
+library(ggplot2)
+TSS <- unlist(Test_results)
+TSS <- as.data.frame(TSS)
+Test_results_ggplot <- cbind(TSS, model=rep(rownames(Test_results), times=20))
+```
+
+
+
+Variability in predictive accuracy between cross-validation runs and models. 
+```{r tss_plot 17.5} 
+p <- ggplot(Test_results_ggplot, aes(model, TSS))
+p + geom_boxplot()
+```
+
+
+
+```{r pred_proj}
+## Average prediction (mean and median) and standard deviation
+Pred_total_mean <- apply(Pred_results,1,mean)
+Pred_total_median <- apply(Pred_results,1,median)
+Pred_total_sd <- apply(Pred_results,1,sd)
+
+## Average projection into the future (mean and median) and variance
+ProjFuture_total_mean <- apply(ProjFuture_results,1,mean)
+ProjFuture_total_median <- apply(ProjFuture_results,1,median)
+ProjFuture_total_sd <- apply(ProjFuture_results,1,sd)
+```
+
+
+Transformation in raster objects to facilitate the representation.
+
+```{r uncertainty 17.16}
+Obs <- rasterFromXYZ(mammals_data[,c("X_WGS84", "Y_WGS84", 
+    "VulpesVulpes")])
+Pred_total_mean_r <- 
+    rasterFromXYZ(cbind(mammals_data[,c("X_WGS84", 
+    "Y_WGS84")],Pred_total_mean))
+Pred_total_median_r <- 
+    rasterFromXYZ(cbind(mammals_data[,c("X_WGS84", 
+    "Y_WGS84")],Pred_total_median))
+Pred_total_sd_r <- 
+    rasterFromXYZ(cbind(mammals_data[,c("X_WGS84", 
+    "Y_WGS84")],Pred_total_sd))
+Out <- stack(Obs,Pred_total_mean_r, 
+    Pred_total_median_r,Pred_total_sd_r)
+names(Out) <- c("Observed Vulpes vulpes","Ensemble modeling_mean","Ensemble modeling_median", "Ensemble modeling_sd")
+```
+
+Habitat suitability maps for Vulpes vulpes predicted by the different model averaging methods and the associated uncertainty map. 
+
+```{r plot_uncert 17.16}
+plot(Out)
+```
+
+Transformation in raster objects to facilitate the representation. 
+```{r future}
+ObsF <- rasterFromXYZ(FutureEnv[,c("X_WGS84", "Y_WGS84", "VulpesVulpes")])
+ProjFuture_total_mean_r <- rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", "Y_WGS84")],ProjFuture_total_mean))
+ProjFuture_total_median_r <- rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", "Y_WGS84")],ProjFuture_total_median))
+ProjFuture_total_sd_r <- rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", "Y_WGS84")],ProjFuture_total_sd))
+OutFut <- stack(ObsF, ProjFuture_total_mean_r, ProjFuture_total_median_r,ProjFuture_total_sd_r)
+names(OutFut) <- c("Observed Vulpes vulpes","Ensemble_modeling_mean","Ensemble_modeling_median", "Ensemble_modeling_sd")
+```
+
+Future Habitat suitability maps for Vulpes vulpes predicted by the different model averaging methods and uncertainty map. 
+```{r plot_future 17.17}
+plot(OutFut)
+```
+
+#### Committee averaging: Sum the binary all binary projections from the 5 models and 20 repetitions. 
+```{r Committee_averaging }
+ProjFuture_CA<-as.data.frame(apply(ProjFuture_results_bin,1:2, 
+                                     sum))
+ProjFuture_CA$CA <- rowSums(ProjFuture_CA)
+```
+
+
+Link between committee averaging and mean probabilities across the models and repetitions. 
+```{r plot_comm_aver 17.18}
+plot(ProjFuture_CA$CA,ProjFuture_total_mean, xlab="Committee averaging", ylab="Mean probability")
+```
+
+Committee averaging all
+
+```{r CA_all_ plot 17.19}
+ProjFuture_CAglm<-rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", 
+                                                     "Y_WGS84")],ProjFuture_CA$GLM))
+ProjFuture_CAgam<-rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", 
+                                                     "Y_WGS84")],ProjFuture_CA$GAM))
+ProjFuture_CAmars<-rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", 
+                                                      "Y_WGS84")],ProjFuture_CA$MARS))
+ProjFuture_CAfda<-rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", 
+                                                     "Y_WGS84")],ProjFuture_CA$FDA))
+ProjFuture_CArf<-rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", 
+                                                    "Y_WGS84")],ProjFuture_CA$RF))
+ProjFuture_CAall<-rasterFromXYZ(cbind(FutureEnv[,c("X_WGS84", 
+                                                     "Y_WGS84")],ProjFuture_CA$CA))
+OutFut_CA <- stack(ProjFuture_CAglm, 
+                     ProjFuture_CAgam,ProjFuture_CAmars, ProjFuture_CAfda, 
+                     ProjFuture_CArf,ProjFuture_CAall)
+names(OutFut_CA) <- c("CA_GLM","CA_GAM","CA_MARS","CA_FDA", 
+                        "CA_RF", "CA_ALL")
+plot(OutFut_CA, nc=2)
+```
+
+
+
+
+#### Species range change
+```{r sp_range_change 17.20}
+SRG <- 100*(colSums(ProjFuture_results_bin)-sum(FutureEnv$VulpesVulpes))/sum(FutureEnv$VulpesVulpes)
+SRG_ToPlot <- as.data.frame(as.numeric(SRG))
+SRG_ToPlot$Model <- rep(c("GLM","GAM","MARS","FDA","RF"), 20)
+colnames(SRG_ToPlot)[1] <- "SRG"
+library(ggplot2)
+ggplot(SRG_ToPlot, aes(SRG)) + geom_histogram(aes(y = ..density.., fill = ..count..), binwidth=1) + geom_density() + scale_fill_gradient("Count", low = "lightgrey", high = "black") + xlab("Species Range Change (%)")# Density 
+```
+
+```{r variation _sp_range 17.21}
+p <- ggplot(SRG_ToPlot, aes(SRG, colour=Model))
+p + geom_density()+ xlab("Species Range Change (%)")
+```
+
+
+

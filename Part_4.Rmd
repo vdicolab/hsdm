@@ -1,0 +1,614 @@
+---
+output:
+  html_document:
+    depth: 3
+    highlight: tango
+    number_sections: no
+    theme: cosmo
+    toc: yes
+  pdf_document:
+    toc: yes
+---
+
+
+#_Habitat Suitability and Distribution Models_
+_with Applications in R_\
+\
+**by A. Guisan^1^, W. Thuiller^2^, N.E. Zimmermann^3^**,\
+\
+with contribution by V. Di Cola, D. Georges and A. Psomas\
+\
+_^1^University of Lausanne, Switzerland_\
+_^2^CNRS, Université Grenoble Alpes, France_\
+_^3^Swiss Federal Research Institute WSL, Switzerland_\
+\
+
+
+
+```{r fig.width = 6, fig.height = 1.5, echo = FALSE, message = FALSE, warning = FALSE, fig.align = 'center'}
+library(raster)
+par(fig = c(0, 0.3, 0, 1))
+plotRGB(stack('UNIL.png'))
+par(fig = c(0.4, 0.6, 0.2, 0.8), new = TRUE)
+plotRGB(stack('CNRS.jpg'))
+par(fig = c(0.7, 1, 0, 1), new = TRUE)
+plotRGB(stack('logo_wsl.png'))
+```
+
+
+# Part VI "Evaluating Models: Errors and Uncertainty"
+## Chapter 15: Measuring Model Accuracy: Which Metrics to Use?
+### Measuring Calibration
+
+```{r load packages, message=FALSE,warning=FALSE}
+library(PresenceAbsence)
+library(randomForest)
+library(biomod2)
+library(ggplot2)
+library(ecospat)
+library(boot)
+library(ltm)
+library(Daim)
+library(mda)
+library(gbm)
+```
+
+Set Working Directory
+```{r setwd}
+setwd("~/data")
+```
+
+
+Create models to evaluate from Part 3
+```{r read_data1}
+#First the data should be loaded to run the models
+mammals_data <- read.csv("tabular/species/mammals_and_bioclim_table.csv", row.names=1)
+```
+
+
+Create the Random Forest model RF
+
+```{r RF}
+RF = randomForest(x = mammals_data[,c("bio3",  "bio7", "bio11", "bio12")],y = as.factor(mammals_data$VulpesVulpes), ntree = 1000, importance = TRUE)
+RF.pred = predict(RF, type="prob")[,2]
+
+```
+
+Create the FDA model
+```{r FDA}
+fda_mod = fda(VulpesVulpes ~ 1+bio3+bio7+bio11+bio12, data=mammals_data,method=mars)
+FDA.pred = predict(fda_mod, mammals_data[,c("bio3",  "bio7", "bio11", "bio12")], type = "posterior")[,2]
+```
+
+Create the BRT model
+```{r GBM}
+BRT.mod <- gbm(VulpesVulpes~ bio3+bio7+bio11+bio12, data=mammals_data, distribution = "bernoulli", n.trees = 2000,  interaction.depth = 7, shrinkage = 0.001, bag.fraction = 0.5, cv.folds=5)
+brt.mod.perf = gbm.perf(BRT.mod, method = "cv", plot.it = F)
+BRT.pred <- predict(BRT.mod, newdata=mammals_data[,c("bio3",  "bio7", "bio11", "bio12")], type="response", n.trees=brt.mod.perf)
+```
+
+Create the Maxent model
+```{r ME, eval=FALSE}
+parent.dir <- dirname(getwd())  ## get the name of the directory where data dir should be
+any(file.exists("data", parent.dir))
+dir.create("MaxEnt.res")
+MaxEnt.layers.dir <- paste(getwd(), "/tabular/bioclim", sep="")
+MaxEnt.samples.dir <- paste(getwd(), "/tabular/species", sep="")
+MaxEnt.out.dir <- "MaxEnt.res"
+MaxEnt.soft.path <- "../data/maxent.jar"  ## the path to maxent.jar file
+Java.soft.path <- "C:/Program Files (x86)/Java/jre1.8.0_101/bin/java.exe" 
+
+list.files(MaxEnt.layers.dir, pattern = ".asc", recursive = T)
+list.files(MaxEnt.samples.dir, pattern = ".csv")
+maxent.cmd <- paste0("\"", Java.soft.path, "\" -mx512m -jar \"", 
+                     MaxEnt.soft.path, "\" environmentallayers=\"", 
+                     file.path(MaxEnt.layers.dir, "current", "ascii"), 
+                     "\" samplesfile=\"", file.path(MaxEnt.samples.dir, "VulpesVulpes.csv"), 
+                     "\" projectionlayers=\"", file.path(MaxEnt.layers.dir, "current", "bioclim_table.csv"), 
+                     "\" outputdirectory=\"", MaxEnt.out.dir, "\"  outputformat=logistic maximumiterations=500 jackknife visible=FALSE redoifexists autorun nowarnings notooltips")
+
+system(command = maxent.cmd)
+
+list.files(MaxEnt.out.dir)
+Maxent.predict <- read.csv('MaxEnt.res/VulpesVulpes_bioclim_table.csv')
+Maxent.pred <- Maxent.predict[,3]
+```
+
+Create an average model (AVER) from the three previous (average model from RF, FDA and BRT)
+```{r aver}
+AVER.pred<-((RF.pred+FDA.pred+BRT.pred)/3)
+```
+
+Create the dataframe with the species data and models  
+```{r df}
+head(mammals_data)
+ObsNum <- mammals_data[,8]
+species <- "VulpesVulpes"
+plotID <- 1:nrow(mammals_data)
+
+EvalData <- data.frame(cbind(plotID, ObsNum, RF.pred, FDA.pred, BRT.pred, AVER.pred))
+
+colnames(EvalData) <- c("plotID", "ObsNum", "RF", "FDA", "BRT", "AVER")
+write.table (EvalData, "tabular/EvalData.txt", sep = "\t")
+```
+
+Read dataset
+
+```{r read_data2}
+EvalData <- read.table("tabular/EvalData.txt")
+species <- "VulpesVulpes"
+models.names = c("RF", "FDA", "BRT","AVER")
+head(EvalData)
+sp <- 1
+```
+
+
+The calibration.plot() function in the PresenceAbsence package allows drawing a calibration plot 
+
+Calibration plots for three single predictions and the averaged model
+```{r calibration.plot 15.4}
+par(oma = c(0, 5, 0, 0), mar = c(4, 4, 4, 1), mfrow = c(2, 2), 
+    cex = 0.8, cex.lab = 1.4, mgp = c(2, 0.5, 0))
+for (mod in 1:4) {
+    calibration.plot(EvalData, which.model = mod, color = mod + 1, xlab = "", ylab = "")
+    }
+    mtext("Predicted Probability of Occurrence", side = 1, line = -1, cex = 1.4, outer = TRUE)
+mtext("Observed Occurrence as Proportion of Sites Surveyed", side = 2, 
+      line = -1, cex = 1.4, outer = TRUE)
+
+```
+
+
+Calibration plots for three single predictions and the averaged model using the functions of Phillips & Elith (2009)
+
+```{r functions calib_plot}
+calibplot <- function(pred, negrug, posrug, ideal, ylim=c(0,1), xlim=c(0,1), capuci=TRUE, xlabel = "Predicted probability of presence", filename=NULL, title="Calibration plot", ...) {
+  if (!is.null(filename)) png(filename)
+  ylow <- pred$y - 2 * pred$se
+  ylow[ylow<0] <- 0
+  yhigh <- pred$y + 2 * pred$se
+  if (capuci) yhigh[yhigh>1] <- 1
+  plot(pred$x, ylow, type="l", col="orange", ylim=ylim, xlim=xlim,
+    xlab=xlabel, lwd=2, ...)
+  lines(pred$x, yhigh, lwd=2, col="orange")
+  lines(pred$x, sapply(pred$x, ideal), lty="dashed")
+  points(pred$x, pred$y, col="deepskyblue")
+  rug(negrug)
+  rug(posrug, col = "orange")
+  title(title)
+  if (!is.null(filename)) dev.off()
+}
+
+smoothingdf <- 6
+smoothdist <- function(pred, res) {
+  require(splines)
+  gam1 <- glm(res ~ ns(pred, df=smoothingdf), weights=rep(1, length(pred)), family=binomial)
+  x <- seq(min(pred), max(pred), length = 512)
+  y <- predict(gam1, newdata = data.frame(pred = x), se.fit = TRUE,
+    type = "response")
+  data.frame(x=x, y=y$fit, se=y$se.fit)
+}
+
+
+pacplot <- function(pred, pa, ...) {
+  predd <- smoothdist(pred, pa)
+  calibplot(predd, negrug=pred[pa==0], posrug=pred[pa==1], ideal=function(x) x, ylab="Probability of presence", ...)
+}
+
+# binned calibration plot with equal width bins
+ecalp <- function(preds, acts, bins=10, do.plot=TRUE, do.clear=TRUE, filename=NULL, title="Binned calibration plot", ...){
+  g <- floor(preds*bins)
+  b <- 0:(bins-1)
+  p <- sapply(b, function(x) if (length(acts[g==x])==0) -1 else sum(acts[g==x]) / length(acts[g==x]))
+  mx <- sapply(b, function(x,g) mean(preds[g==x]), g)
+  if(do.plot) {
+    if (!is.null(filename)) png(filename)
+    if (do.clear) {
+      plot(mx, p, xlim=c(0,1), ylim=c(0,1), ...)
+    } else {
+      points(mx, p, xlim=c(0,1), ylim=c(0,1), ...)
+    }
+    rug(preds[acts==0])
+    rug(preds[acts==1], col = "orange")
+    abline(0,1,lty="dashed")
+    title(title)
+    if (!is.null(filename)) dev.off()
+  }
+  return(p)
+}
+```
+
+
+
+```{r calib_plot2 15.5}
+Data<-EvalData[1:2000,]
+#true probability of presence
+RF<-Data$RF
+FDA<-Data$FDA
+BRT<-Data$BRT
+AVER<-Data$AVER
+
+# number of samples in data sets
+ns <- 2000
+
+# observed presence / absence, randomly drawn according to pt
+oRF <- rbinom(ns, 1, RF)
+oFDA <- rbinom(ns, 1, FDA)
+oBRT <- rbinom(ns, 1, BRT)
+oAVER <- rbinom(ns, 1, AVER)
+
+par(oma = c(0, 5, 0, 0), mar = c(4, 4, 4, 1), mfrow = c(2, 4), 
+    cex = 0.7, cex.lab = 1.4, mgp = c(2, 0.5, 0))
+for (mod in 1:4) {
+  # binned calibration plot with equal width bins
+  ecalp(RF, oRF, title="(a) RF")
+  ecalp(FDA, oFDA, title="(b) FDA")
+  ecalp(BRT, oBRT, title="(c) BRT")
+  ecalp(AVER, oAVER, title="(d) AVER")
+  # presence-absence smoothed calibration plot
+  pacplot(RF, oRF, title="(e) RF")
+  pacplot(FDA, oFDA, title="(f) FDA")
+  pacplot(BRT, oBRT, title="(g) BRT")
+  pacplot(AVER, oAVER, title="(h) AVER")
+}
+```
+
+
+### Measuring Discrimination and Selecting a Prediction Threshold
+
+Contingency table for one model (AVER) and one threshold (0.5)
+```{r  conting_table}
+table(EvalData$AVER>0.5,EvalData$ObsNum)
+```
+
+Example presence.absence.accuracy() - Showing one model (AVER), eleven thresholds
+```{r accur_thresholds}
+accu <- presence.absence.accuracy(EvalData, 
+                                  which.model = 4, 
+                                  threshold = 11, 
+                                  st.dev = FALSE)
+accu[, -c(1, 2)] <- signif(accu[, -c(1, 2)], digits = 2)
+accu [c("threshold", "PCC", "sensitivity", "specificity", "Kappa")]
+```
+
+
+Effect of threshold choice in prevalence (11 thresholds)
+```{r preval_thresh}
+pred.prev <- predicted.prevalence(EvalData, threshold = 11)
+pred.prev[, 2:6] <- round(pred.prev[, 2:6], digits = 2)
+pred.prev
+```
+
+
+Meva.table for one model (AVER) and one threshold (0.6)
+```{r meva_table}
+meva <- ecospat.meva.table (EvalData$AVER, EvalData$ObsNum, 0.6)
+meva
+```
+
+
+
+Calculate max.kappa with the function *ecospat.max.kappa()*
+```{r kappa} 
+kappa100 <- ecospat.max.kappa(EvalData$AVER, EvalData$ObsNum)
+kappa100 [[2]]
+```
+
+
+Plotting the Kappa and TSS for each model using the function *Find.Optim.Stat()* from the package biomod2
+```{r kappa.tss 15.7}
+n=100
+dataToPlot <- as.data.frame(matrix(0, ncol=4, nrow=n*8, dimnames=list(NULL,c("Evaluation","Threshold","Metric","Model"))))
+dataToPlot[,2] <- rep(seq(0,1,length.out = 100),8)
+dataToPlot[,3] <- rep(c("TSS","KAPPA"),each=100, times=4)
+dataToPlot[,4] <- c(rep("RF", 200), rep("FDA", 200),rep("BRT", 200),rep("AVER", 200))
+wrapper <- function(x, stat, Fit, Obs){
+return(Find.Optim.Stat(Stat=stat,  Fit=Fit, Obs=Obs, Fixed.thresh = x)[1])
+}
+b=1
+for(i in 3:6){
+a <- EvalData[,i]
+dataToPlot[b:(b+99),1] <- sapply(seq(0,1,length.out = 100), wrapper, stat='TSS',  Fit=a, Obs=EvalData$ObsNum)
+b <- b+100
+dataToPlot[b:(b+99),1] <- sapply(seq(0,1,length.out = 100), wrapper, stat='KAPPA',  Fit=a, Obs=EvalData$ObsNum)
+b <- b+100
+}
+
+qplot(Threshold, Evaluation, data=dataToPlot, color=Model, facets=~Metric, geom = c("point","line"))
+
+```
+
+
+Plotting the error statistics as a function of threshold in four models
+```{r error.threshold.plot 15.8}
+data <- EvalData[1:6]
+N.models <- ncol(data) - 2
+par(oma=c(0,5,0,0), mar=c(4,4,4,1), mfrow=c(2,2), cex=0.7, cex.lab=1.4, mgp=c(2, 0.5,0))
+for (mod in 1:N.models){
+  error.threshold.plot(data, 
+                       which.model = mod, 
+                       color = TRUE, 
+                       add.legend = TRUE, 
+                       legend.cex = 0.7)
+  }
+```
+
+ROC plot and AUC
+```{r auc.roc.plot 15.9}
+auc.roc.plot(data, color=T, legend.cex=1.4, main="")
+```
+
+
+Measuring calibration and discrimination with Point-biserial correlation (COR)
+```{r COR_aver}
+ObsNum <- EvalData[,2]
+AVER<- EvalData[,6]
+cor(AVER, ObsNum)
+```
+
+```{r COR_brt}
+BRT<-EvalData[,5]
+cor(BRT, ObsNum)
+```
+
+
+
+
+## Comparing Probabilistic Predictions to Presence- Only Observations
+Calculate of AVI and CVI for BRT model
+
+```{r AVI}
+obs <- (EvalData$BRT * EvalData$ObsNum)
+avi <- sum(obs > 0.5)/length(obs)
+avi
+```
+
+
+```{r CVI}
+avi0 <- sum(EvalData$ObsNum)/length(obs)
+cvi <- avi0 - avi
+cvi
+```
+
+Boyce index in the average model
+```{r boyce.index 15.10}
+obs <- (EvalData$AVER [which(EvalData$ObsNum==1)])
+boyce<-ecospat.boyce (fit = EvalData$AVER , obs, nclass=0, window.w="default", res=100, PEplot=T)
+boyce$Spearman.cor
+```
+
+POC (Presence-only calibration plots) by Phillips and Elith (2010)
+
+
+```{r pocplot_fun}
+#Load function pocplot()
+calibplot <- function(pred, negrug, posrug, ideal, ylim=c(0,1), xlim=c(0,1), capuci=TRUE, xlabel = "Predicted probability of presence", filename=NULL, title="Calibration plot", ...) {
+  if (!is.null(filename)) png(filename)
+  ylow <- pred$y - 2 * pred$se
+  ylow[ylow<0] <- 0
+  yhigh <- pred$y + 2 * pred$se
+  if (capuci) yhigh[yhigh>1] <- 1
+  plot(pred$x, ylow, type="l", col="orange", ylim=ylim, xlim=xlim,
+    xlab=xlabel, lwd=2, ...)
+  lines(pred$x, yhigh, lwd=2, col="orange")
+  lines(pred$x, sapply(pred$x, ideal), lty="dashed")
+  points(pred$x, pred$y, col="deepskyblue")
+  rug(negrug)
+  rug(posrug, col = "orange")
+  title(title)
+  if (!is.null(filename)) dev.off()
+}
+
+smoothingdf <- 6
+smoothdist <- function(pred, res) {
+  require(splines)
+  gam1 <- glm(res ~ ns(pred, df=smoothingdf), weights=rep(1, length(pred)), family=binomial)
+  x <- seq(min(pred), max(pred), length = 512)
+  y <- predict(gam1, newdata = data.frame(pred = x), se.fit = TRUE,
+    type = "response")
+  data.frame(x=x, y=y$fit, se=y$se.fit)
+}
+
+pocplot <- function(pred, back, linearize=TRUE, ...) {
+  ispresence <- c(rep(1,length(pred)), rep(0, length(back)))
+  predd <- smoothdist(c(pred,back), ispresence)
+  c <- mean(back)*length(back)/length(pred)
+  if (linearize) {
+    fun <- function(x,y) c*y / (1-y)
+    predd$y <- mapply(fun, predd$x, predd$y)
+    predd$se <- mapply(fun, predd$x, predd$se)
+    ideal <- function(x) x
+    ylab <- "Relative probability of presence" 
+  } 
+  else {
+    ideal <- function(x) x / (x + c)
+    ylab <- "Probability of presence"
+  }
+  calibplot(predd, negrug=back, posrug=pred, ideal=ideal, ylab=ylab,
+    capuci = FALSE, ...)
+}
+```
+
+
+```{r poc.plot 15.11, message=FALSE}
+pocplot(AVER[ObsNum==1], AVER, title="AVER")
+```
+
+## Chapter 16: Assessing Model Performance: Which Data to Use?
+### Evaluation Using k- Fold Cross- Validation
+
+To continue with the examples we are going to use a simplified and smaller version of the dataset *mammals_data.csv*, now called *s_mammals_data.csv*
+```{r read_data3}
+s_mammals_data <- read.csv("tabular/species/summary_mammals_and_bioclim.csv", row.names=1)
+```
+
+
+```{r cv_error}
+set.seed(555)
+cv.error.10=rep(0,10)
+for (i in 1:10){
+ glm.fit=glm(VulpesVulpes~poly(bio3,i),data=s_mammals_data)
+ cv.error.10[i]=cv.glm(s_mammals_data,glm.fit,K=10)$delta[1]
+ }
+cv.error.10
+```
+
+
+with *Daim* package
+```{r data_prep}
+vulpes_data<-s_mammals_data[c(9:13,8)]
+vulpes_data$VulpesVulpes <- as.factor(vulpes_data$VulpesVulpes)
+```
+
+Evaluation of a randomForest model
+```{r rf_model}
+myRF <- function(formula, train, test){
+model <- randomForest(formula, train)
+predict(model,test,type="prob")[,"pos"]
+}
+```
+
+
+Optimal cut point determination
+```{r opt_cut-point}
+set.seed(555)
+
+vulpes_RF_cv <- Daim(formula=VulpesVulpes~., model=myRF, data=vulpes_data, labpos="1", control=Daim.control(method="cv", k=10, k.runs=10), cutoff="cv")
+
+vulpes_RF_cv
+summary(vulpes_RF_cv)
+auc(vulpes_RF_cv)$auc.loob
+auc(vulpes_RF_cv)$auc.samples
+```
+
+
+
+Plot a Daim object generated by the Daim function.
+```{r cv.plot 16.5}
+par(mfrow=c(1,2))
+plot(vulpes_RF_cv, method="cv")
+plot(vulpes_RF_cv, method="sample")
+
+```
+
+
+### Evaluation Using Leave- One- Out Cross- Validation (Jackknife)
+
+LOO-CV on a glm
+```{r glm_model1}
+glm.fit=glm(VulpesVulpes~bio3+bio7+bio11+bio12,family="binomial",data=s_mammals_data)
+coef(glm.fit)
+
+```
+
+```{r glm_model2}
+glm.fit=glm(VulpesVulpes~bio3+bio7+bio11+bio12,family="binomial",data=s_mammals_data)
+cv.err=cv.glm(s_mammals_data,glm.fit)
+cv.err$delta
+```
+
+
+```{r cv_error1, warning=FALSE}
+cv.error=rep(0,5)
+for (i in 1:5){
+ glm.fit=glm(VulpesVulpes~poly(bio3,i),family="binomial",data=s_mammals_data)
+ cv.error[i]=cv.glm(s_mammals_data,glm.fit)$delta[1]
+ }
+cv.error
+```
+
+
+### Evaluation Using Repeated Split Sample Cross- Validation
+
+```{r samples}
+set.seed(555)
+train=sample(2488,1244)
+```
+
+
+```{r glm_model3}
+attach(s_mammals_data)
+glm.fit=glm(VulpesVulpes~bio3+bio7+bio11+bio12,family="binomial",data=s_mammals_data,subset=train)
+```
+
+
+```{r mean_mod}
+mean((VulpesVulpes-predict(glm.fit,s_mammals_data))[-train]^2)
+```
+
+```{r glm_models}
+glm.fit2=glm(VulpesVulpes~poly(bio3+bio7+bio11+bio12,2),family="binomial",data=s_mammals_data,subset=train)
+mean((VulpesVulpes-predict(glm.fit2,s_mammals_data))[-train]^2)
+glm.fit3=glm(VulpesVulpes~poly(bio3+bio7+bio11+bio12,3),family="binomial",data=s_mammals_data,subset=train)
+mean((VulpesVulpes-predict(glm.fit3,s_mammals_data))[-train]^2)
+```
+
+
+### Evaluation by Bootstrap
+
+
+```{r boot.fn1, warning=FALSE}
+boot.fn=function(data,index)
+ return(coef(glm(VulpesVulpes~bio3+bio7+bio11+bio12,family="binomial",data=data,subset=index)))
+boot.fn(s_mammals_data,1:2488)
+```
+
+
+```{r boot.fn2, warning=FALSE}
+set.seed(555)
+boot.fn(s_mammals_data,sample(2488,2488,replace=T))
+boot.fn(s_mammals_data,sample(2488,2488,replace=T))
+```
+
+
+```{r boot.fn3}
+boot(s_mammals_data,boot.fn,1000)
+```
+
+
+```{r summary_boot}
+summary(glm(VulpesVulpes~bio3+bio7+bio11+bio12,family="binomial",data=s_mammals_data))$coef
+```
+
+```{r boot.fn4, warning=FALSE}
+boot.fn=function(data,index)
+ coefficients(glm(VulpesVulpes~bio3+I(bio3^2),family="binomial",data=data,subset=index))
+set.seed(555)
+boot(s_mammals_data,boot.fn,1000)
+summary(glm(VulpesVulpes~bio3+I(bio3^2),family="binomial", data=s_mammals_data))$coef
+```
+
+
+Daim bootstrap
+```{r daim}
+vulpes_RF <- Daim(formula=VulpesVulpes~., model=myRF, data=vulpes_data, labpos="1", control=Daim.control(number=50))
+
+summary(vulpes_RF)
+```
+
+
+Plot a Daim object generated by the Daim function.
+```{r daim 16.9}
+par(mfrow=c(2,2))
+plot(vulpes_RF, method="0.632+", legend=TRUE)
+plot(vulpes_RF, method="sample")
+plot(vulpes_RF, method="0.632+", main="Comparison between methods")
+plot(vulpes_RF, method="0.632", col="blue", add=TRUE)
+plot(vulpes_RF, method="loob", col="green", add=TRUE)
+legend("bottomright", c("0.632+","0.632","loob"), col=c("red","blue","green"), lty=1, inset=0.01)
+plot(vulpes_RF, all.roc=TRUE)
+
+```
+
+
+
+The optimal cut-point corresponding to 0.632+ estimation of the sensitivity and the specificity
+
+```{r daim2}
+set.seed(555)
+
+vulpes_RF2 <- Daim(formula=VulpesVulpes~., model=myRF, data=vulpes_data, labpos="1", control=Daim.control(method="boot", number=100), cutoff="0.632+")
+
+summary(vulpes_RF2)
+```
+
