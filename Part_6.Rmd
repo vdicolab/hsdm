@@ -67,8 +67,6 @@ print the summary of the extracted object
 ```{r}
 data
 
-##' It appers that only the item **5637308** as data so we can remove the other ones
-
 data <- data[['5637308']] 
 ```
 
