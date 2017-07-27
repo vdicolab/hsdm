@@ -21,3 +21,5 @@ AUTHORS:
 
 
 
+If you use any of these figures and code examples in a presentation or lecture, somewhere in your set of slides we would really appreciate if you please add the paragraph: "Some of the figures in this presentation are taken from "Habitat Suitability and Distribution Models: with applications in R"  (CUP, 2017) with permission from the authors: A. Guisan, W. Thuiller and N.E. Zimmerman " 
+If you wish to use any of these figures in a publication, you must get permission from CUP, and each figure must be accompanied by a similar acknowledgement.
