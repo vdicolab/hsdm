@@ -14,6 +14,15 @@ _3 Swiss Federal Research Institute WSL, Switzerland_\
 
 http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r?format=PB#OQxt1hBZ3OzB3z44.97
 
+*Citation:* 
+@book{
+  title={Habitat Suitability and Distribution Models: With Applications in R},
+  author={Guisan, A. and Thuiller, W. and Zimmermann, N.E.},
+  isbn={9780521758369},
+  series={Ecology, Biodiversity and Conservation},
+  year={2017},
+  publisher={Cambridge University Press}
+}
 
 
 
