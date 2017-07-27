@@ -1,7 +1,6 @@
 # hsdm 
 ### The repository contains figures, data and code for the book 
-## Habitat Suitability and Distribution Models: 
-### with Applications with R .
+### Habitat Suitability and Distribution Models: with Applications with R .
 
 Note that the copyright to these figures is held by CUP.
 
