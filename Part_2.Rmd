@@ -15,17 +15,6 @@ _3 Swiss Federal Research Institute WSL, Switzerland_\
 http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r?format=PB#OQxt1hBZ3OzB3z44.97
 
 
-```{r fig.width = 6, fig.height = 1.5, echo = FALSE, message = FALSE, warning = FALSE, fig.align = 'center'}
-library(raster)
-par(fig = c(0, 0.3, 0, 1))
-plotRGB(stack('UNIL.png'))
-par(fig = c(0.4, 0.6, 0.2, 0.8), new = TRUE)
-plotRGB(stack('CNRS.jpg'))
-par(fig = c(0.7, 1, 0, 1), new = TRUE)
-plotRGB(stack('logo_wsl.png'))
-```
-
-
 
 
 # Part II "Data Acquisition, Sampling Design, and Spatial Scales"
