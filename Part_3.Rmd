@@ -1,13 +1,13 @@
 # **Habitat Suitability and Distribution Models**
 ### with Applications in R
 \
-**by A. Guisan &, W. Thuiller +, N.E. Zimmermann $ **,\
+**by A. Guisan (1), W. Thuiller (2), N.E. Zimmermann (3) **,\
 \
 with contribution by V. Di Cola, D. Georges and A. Psomas\
 \
-_& University of Lausanne, Switzerland_\
-_+ CNRS, Université Grenoble Alpes, France_\
-_$ Swiss Federal Research Institute WSL, Switzerland_\
+_(1) University of Lausanne, Switzerland_\
+_(2) CNRS, Université Grenoble Alpes, France_\
+_(3) Swiss Federal Research Institute WSL, Switzerland_\
 
 
 #### Cambridge University Press
