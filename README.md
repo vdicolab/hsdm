@@ -6,7 +6,7 @@ Note that the copyright to these figures is held by Cambridge University Press.
 
 www.unil.ch/hsdm
 
-http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r?format=PB#u1w3DhUBMS23Aj0h.97
+http://www.cambridge.org/gb/academic/subjects/life-sciences/quantitative-biology-biostatistics-and-mathematical-modellin/habitat-suitability-and-distribution-models-applications-r
 
 PUBLICATION PLANNED FOR: September 2017
  
