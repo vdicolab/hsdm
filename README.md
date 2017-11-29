@@ -23,3 +23,4 @@ AUTHORS:
 
 If you use any of these figures and code examples in a presentation or lecture, please add the source: "Guisan A., Thuiller W. and Zimmermann N.E. 2017. Cambridge University Press". 
 If you wish to use any of these figures in a publication, you must get permission from CUP, and each figure must be accompanied by a similar acknowledgement.
+test
